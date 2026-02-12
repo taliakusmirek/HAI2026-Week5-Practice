@@ -5,11 +5,17 @@ from openai import OpenAI
 from agent_panel import agent_panel
 
 try:
+    # Try Streamlit Community Cloud secrets format
     api_key = st.secrets["openai"]["api_key"]
-except Exception:
-    from dotenv import load_dotenv
-    load_dotenv()
-    api_key = os.environ["OPENAI_API_KEY"]
+except KeyError:
+    try:
+        # Fallback to simple OPENAI_API_KEY format
+        api_key = st.secrets["OPENAI_API_KEY"]
+    except KeyError:
+        # Local development fallback
+        from dotenv import load_dotenv
+        load_dotenv()
+        api_key = os.environ["OPENAI_API_KEY"]
 
 client = OpenAI(api_key=api_key)
 
