@@ -16,6 +16,10 @@ DEFAULT_STATE = {
     "agent_df": None,
     "agent_chart_specs": [],
     "agent_pending_message": None,
+    "user_guidance": "",
+    "guidance_level": "none",
+    "analysis_focus": "",
+    "preferred_tools": [],
 }
 
 def get_state(key):
@@ -29,9 +33,37 @@ def restart_agent(user_question, filtered_df, show_chart=False):
     set_state("agent_events", [])
     set_state("agent_chart_specs", [])
     set_state("agent_pending_message", None)
+    
+    # Reset guidance state
+    set_state("user_guidance", "")
+    set_state("guidance_level", "none")
+    set_state("analysis_focus", "")
+    set_state("preferred_tools", [])
 
     tools = get_tools(filtered_df)
     system_content = "You are a data analyst with access to a tool that executes Python code on a movie database."
+    
+    # Add user guidance to system content
+    guidance_level = get_state("guidance_level")
+    user_guidance = get_state("user_guidance")
+    analysis_focus = get_state("analysis_focus")
+    preferred_tools = get_state("preferred_tools")
+    
+    if guidance_level != "none":
+        system_content += "\n\nUser Guidance:\n"
+        if user_guidance:
+            system_content += f"General guidance: {user_guidance}\n"
+        if analysis_focus:
+            system_content += f"Focus areas: {analysis_focus}\n"
+        if preferred_tools:
+            system_content += f"Preferred approaches: {', '.join(preferred_tools)}\n"
+        
+        if guidance_level == "strong":
+            system_content += "\nIMPORTANT: Follow the user guidance closely and prioritize their preferred approaches."
+        elif guidance_level == "moderate":
+            system_content += "\nConsider the user guidance as helpful suggestions but use your judgment."
+        elif guidance_level == "light":
+            system_content += "\nKeep the user guidance in mind as background context."
 
     if show_chart:
         tools.append(get_chart_tool())
@@ -44,6 +76,39 @@ def restart_agent(user_question, filtered_df, show_chart=False):
     set_state("agent_tools", tools)
     set_state("agent_df", filtered_df)
 
+
+def update_guidance(guidance, level, focus, tools):
+    set_state("user_guidance", guidance)
+    set_state("guidance_level", level)
+    set_state("analysis_focus", focus)
+    set_state("preferred_tools", tools)
+    
+    # If agent is already running, update the system message
+    if get_state("agent_phase") != "idle":
+        messages = get_state("agent_messages")
+        # Update the system message with new guidance
+        system_content = "You are a data analyst with access to a tool that executes Python code on a movie database."
+        
+        if level != "none":
+            system_content += "\n\nUser Guidance:\n"
+            if guidance:
+                system_content += f"General guidance: {guidance}\n"
+            if focus:
+                system_content += f"Focus areas: {focus}\n"
+            if tools:
+                system_content += f"Preferred approaches: {', '.join(tools)}\n"
+            
+            if level == "strong":
+                system_content += "\nIMPORTANT: Follow the user guidance closely and prioritize their preferred approaches."
+            elif level == "moderate":
+                system_content += "\nConsider the user guidance as helpful suggestions but use your judgment."
+            elif level == "light":
+                system_content += "\nKeep the user guidance in mind as background context."
+        
+        # Update the first message (system message)
+        if messages and messages[0]["role"] == "system":
+            messages[0]["content"] = system_content
+            set_state("agent_messages", messages)
 
 # ── Logic ──
 
@@ -138,6 +203,83 @@ def reject_pending_tools(feedback):
 
 # ── Rendering ──
 
+def render_guidance_panel():
+    """Render the guidance control panel"""
+    st.subheader("🧭 Agent Guidance")
+    
+    # Guidance level selector
+    guidance_level = get_state("guidance_level")
+    new_level = st.selectbox(
+        "Guidance Level:",
+        options=["none", "light", "moderate", "strong"],
+        index=["none", "light", "moderate", "strong"].index(guidance_level),
+        help="How much should the agent follow your guidance?"
+    )
+    
+    # General guidance text
+    current_guidance = get_state("user_guidance")
+    new_guidance = st.text_area(
+        "General Guidance:",
+        value=current_guidance,
+        placeholder="E.g., 'Focus on statistical significance', 'Consider only recent movies', 'Be thorough but concise'",
+        help="Provide general hints or constraints for the agent's analysis approach"
+    )
+    
+    # Analysis focus
+    current_focus = get_state("analysis_focus")
+    new_focus = st.text_input(
+        "Analysis Focus:",
+        value=current_focus,
+        placeholder="E.g., 'genre trends', 'rating patterns', 'temporal analysis'",
+        help="Specific areas or aspects to focus on"
+    )
+    
+    # Preferred approaches/tools
+    current_tools = get_state("preferred_tools")
+    tools_options = ["statistical analysis", "data visualization", "filtering", "aggregation", "comparison", "trend analysis"]
+    new_tools = st.multiselect(
+        "Preferred Approaches:",
+        options=tools_options,
+        default=current_tools if current_tools else [],
+        help="Select analysis approaches you'd like the agent to prioritize"
+    )
+    
+    # Apply guidance button
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        apply_guidance = st.button("Apply Guidance", type="primary", use_container_width=True)
+    with col2:
+        clear_guidance = st.button("Clear Guidance", use_container_width=True)
+    
+    # Handle guidance updates
+    if apply_guidance:
+        update_guidance(new_guidance, new_level, new_focus, new_tools)
+        get_state("agent_events").append({
+            "type": "guidance_update",
+            "level": new_level,
+            "guidance": new_guidance,
+            "focus": new_focus,
+            "tools": new_tools
+        })
+        st.rerun()
+    
+    if clear_guidance:
+        update_guidance("", "none", "", [])
+        get_state("agent_events").append({
+            "type": "guidance_cleared"
+        })
+        st.rerun()
+    
+    # Show current guidance status
+    if guidance_level != "none":
+        st.info(f"📍 **Current Guidance Level:** {guidance_level.title()}")
+        if new_guidance:
+            st.write(f"💭 **Guidance:** {new_guidance}")
+        if new_focus:
+            st.write(f"🎯 **Focus:** {new_focus}")
+        if new_tools:
+            st.write(f"🛠️ **Preferred:** {', '.join(new_tools)}")
+
 def render_events():
     for event in get_state("agent_events"):
         if event["type"] == "thought":
@@ -158,6 +300,18 @@ def render_events():
             st.markdown(f"**Rejected:** `{event['name']}`")
             if event.get("feedback"):
                 st.text(f"Feedback: {event['feedback']}")
+            st.divider()
+        elif event["type"] == "guidance_update":
+            st.markdown(f"**🧭 Guidance Updated (Level: {event['level'].title()})**")
+            if event.get("guidance"):
+                st.write(f"💭 {event['guidance']}")
+            if event.get("focus"):
+                st.write(f"🎯 Focus: {event['focus']}")
+            if event.get("tools"):
+                st.write(f"🛠️ Approaches: {', '.join(event['tools'])}")
+            st.divider()
+        elif event["type"] == "guidance_cleared":
+            st.markdown("**🧭 Guidance Cleared**")
             st.divider()
         elif event["type"] == "answer":
             st.markdown(f"**Thought:** {event['thought']}")
@@ -188,41 +342,48 @@ def render_pending_feedback():
     return submitted, feedback
 
 def render_panel():
-    st.subheader("Analysis Results")
-    container = st.container(height=600)
-    actions = {}
-    with container:
-        phase = get_state("agent_phase")
+    # Create a two-column layout: guidance panel on left, main content on right
+    col1, col2 = st.columns([1, 2])
+    
+    with col1:
+        render_guidance_panel()
+    
+    with col2:
+        st.subheader("Analysis Results")
+        container = st.container(height=600)
+        actions = {}
+        with container:
+            phase = get_state("agent_phase")
 
-        if phase == "idle":
-            st.info("Enter a question and click 'Analyze' to see results.")
+            if phase == "idle":
+                st.info("Enter a question and click 'Analyze' to see results.")
 
-        elif phase in ("thinking", "acting"):
-            with st.expander("Agent Reasoning Trace", expanded=True):
-                render_events()
-            st.spinner("Agent is thinking...")
+            elif phase in ("thinking", "acting"):
+                with st.expander("Agent Reasoning Trace", expanded=True):
+                    render_events()
+                st.spinner("Agent is thinking...")
 
-        elif phase == "awaiting_approval":
-            with st.expander("Agent Reasoning Trace", expanded=True):
-                render_events()
-            approved, rejected = render_pending_approval()
-            actions = {"approved": approved, "rejected": rejected}
+            elif phase == "awaiting_approval":
+                with st.expander("Agent Reasoning Trace", expanded=True):
+                    render_events()
+                approved, rejected = render_pending_approval()
+                actions = {"approved": approved, "rejected": rejected}
 
-        elif phase == "awaiting_feedback":
-            with st.expander("Agent Reasoning Trace", expanded=True):
-                render_events()
-            submitted, feedback = render_pending_feedback()
-            actions = {"submitted": submitted, "feedback": feedback}
+            elif phase == "awaiting_feedback":
+                with st.expander("Agent Reasoning Trace", expanded=True):
+                    render_events()
+                submitted, feedback = render_pending_feedback()
+                actions = {"submitted": submitted, "feedback": feedback}
 
-        elif phase == "done":
-            with st.expander("Agent Reasoning Trace", expanded=False):
-                render_events()
-            events = get_state("agent_events")
-            if events and events[-1].get("answer"):
-                st.write("**Answer:**")
-                st.write(events[-1]["answer"])
-            for spec in get_state("agent_chart_specs"):
-                st.vega_lite_chart(spec, use_container_width=True)
+            elif phase == "done":
+                with st.expander("Agent Reasoning Trace", expanded=False):
+                    render_events()
+                events = get_state("agent_events")
+                if events and events[-1].get("answer"):
+                    st.write("**Answer:**")
+                    st.write(events[-1]["answer"])
+                for spec in get_state("agent_chart_specs"):
+                    st.vega_lite_chart(spec, use_container_width=True)
 
     return actions
 

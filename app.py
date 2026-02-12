@@ -5,7 +5,7 @@ from openai import OpenAI
 from agent_panel import agent_panel
 
 try:
-    api_key = st.secrets["OPENAI_API_KEY"]
+    api_key = st.secrets["openai"]["api_key"]
 except Exception:
     from dotenv import load_dotenv
     load_dotenv()
